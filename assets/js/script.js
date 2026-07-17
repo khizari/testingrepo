@@ -3,8 +3,10 @@
  * JavaScript for interactivity and animations
  */
 
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
   "use strict";
+
+  if (window.MenuStore?.ready) await window.MenuStore.ready;
 
   // DOM Elements
   const header = document.querySelector("header");

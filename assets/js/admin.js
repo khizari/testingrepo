@@ -1,11 +1,7 @@
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
   "use strict";
 
   if (!window.MenuStore) return;
-
-  const ADMIN_EMAIL = "admin@fastfood.com";
-  const ADMIN_PASSWORD = "admin123";
-  const AUTH_KEY = "fastFoodAdminLoggedIn";
 
   const imageOptions = [
     "assets/images/burger.png",
@@ -68,6 +64,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const closeItemDialog = document.getElementById("closeItemDialog");
   const cancelItem = document.getElementById("cancelItem");
 
+  await window.MenuStore.ready;
   let categories = window.MenuStore.readCategories();
   let currentVariants = [];
   let currentAddons = [];
@@ -75,30 +72,37 @@ document.addEventListener("DOMContentLoaded", function () {
 
   setupSelects();
   renderCategories();
-  syncAuthView();
+  await syncAuthView();
 
-  loginForm.addEventListener("submit", function (event) {
+  loginForm.addEventListener("submit", async function (event) {
     event.preventDefault();
 
-    const email = adminEmail.value.trim().toLowerCase();
+    const email = adminEmail.value.trim();
     const password = adminPassword.value;
 
-    if (email !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) {
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: email, password }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Login failed");
+    } catch (error) {
       loginError.textContent = "Email ya password ghalat hai.";
       adminPassword.value = "";
       adminPassword.focus();
       return;
     }
 
-    sessionStorage.setItem(AUTH_KEY, "true");
     loginError.textContent = "";
-    syncAuthView();
+    setAuthView(true);
     showToast("Admin panel open ho gaya.");
   });
 
-  logoutButton.addEventListener("click", function () {
-    sessionStorage.removeItem(AUTH_KEY);
-    syncAuthView();
+  logoutButton.addEventListener("click", async function () {
+    await fetch("/api/logout", { method: "POST" }).catch(() => {});
+    setAuthView(false);
     loginForm.reset();
     adminEmail.focus();
   });
@@ -115,7 +119,7 @@ document.addEventListener("DOMContentLoaded", function () {
   addCategoryButton.addEventListener("click", openAddCategoryDialog);
   searchInput.addEventListener("input", renderCategories);
 
-  categoryForm.addEventListener("submit", function (event) {
+  categoryForm.addEventListener("submit", async function (event) {
     event.preventDefault();
 
     const name = categoryName.value.trim();
@@ -135,17 +139,17 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (existingIndex >= 0) {
       categories[existingIndex] = { id: currentId, label: name };
-      showToast("Category updated successfully.");
     } else {
       categories.unshift({ id: currentId, label: name });
-      showToast("New category added successfully.");
     }
 
-    saveCategoriesAndRender();
-    categoryDialog.close();
+    if (await saveMenuAndRender()) {
+      categoryDialog.close();
+      showToast(existingIndex >= 0 ? "Category updated successfully." : "New category added successfully.");
+    }
   });
 
-  itemForm.addEventListener("submit", function (event) {
+  itemForm.addEventListener("submit", async function (event) {
     event.preventDefault();
 
     const currentId = itemId.value || window.MenuStore.createId(itemName.value);
@@ -165,14 +169,14 @@ document.addEventListener("DOMContentLoaded", function () {
     const selectedIndex = items.findIndex((item) => item.id === currentId);
     if (selectedIndex >= 0) {
       items[selectedIndex] = nextItem;
-      showToast("Item updated successfully.");
     } else {
       items.push(nextItem);
-      showToast("New item added successfully.");
     }
 
-    saveItemsAndRender();
-    itemDialog.close();
+    if (await saveMenuAndRender()) {
+      itemDialog.close();
+      showToast(selectedIndex >= 0 ? "Item updated successfully." : "New item added successfully.");
+    }
   });
 
   updateItemPreview();
@@ -184,7 +188,14 @@ document.addEventListener("DOMContentLoaded", function () {
       try {
         itemImagePreview.style.opacity = "0.5";
         const dataUrl = await compressImage(file, 1000, 0.82);
-        itemImage.value = dataUrl;
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, dataUrl }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Upload failed");
+        itemImage.value = data.url;
         updateItemPreview();
       } catch (err) {
         showToast("Photo upload failed: " + err.message);
@@ -277,9 +288,17 @@ document.addEventListener("DOMContentLoaded", function () {
       .join("");
   }
 
-  function syncAuthView() {
-    const isLoggedIn = sessionStorage.getItem(AUTH_KEY) === "true";
+  async function syncAuthView() {
+    let isLoggedIn = false;
+    try {
+      const response = await fetch("/api/session", { cache: "no-store" });
+      const data = await response.json();
+      isLoggedIn = Boolean(data.authenticated);
+    } catch (_) {}
+    setAuthView(isLoggedIn);
+  }
 
+  function setAuthView(isLoggedIn) {
     document.body.classList.toggle("admin-locked", !isLoggedIn);
     loginScreen.hidden = isLoggedIn;
     adminHeader.hidden = !isLoggedIn;
@@ -405,7 +424,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
 
-  function moveCategory(id, direction) {
+  async function moveCategory(id, direction) {
     const currentIndex = categories.findIndex((category) => category.id === id);
     if (currentIndex < 0) return;
 
@@ -414,10 +433,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const [category] = categories.splice(currentIndex, 1);
     categories.splice(nextIndex, 0, category);
-    saveCategoriesAndRender();
-    showToast("Category order updated.");
+    if (await saveMenuAndRender()) showToast("Category order updated.");
   }
-  function deleteCategory(id) {
+  async function deleteCategory(id) {
     const selectedCategory = categories.find((category) => category.id === id);
     if (!selectedCategory) return;
 
@@ -429,11 +447,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     categories = categories.filter((category) => category.id !== id);
     items = items.filter((item) => item.category !== id);
-    window.MenuStore.saveCategories(categories);
-    window.MenuStore.saveItems(items);
-    renderCategoryOptions();
-    renderCategories();
-    showToast("Category deleted successfully.");
+    if (await saveMenuAndRender()) showToast("Category deleted successfully.");
   }
 
   function openAddItemDialog(categoryId) {
@@ -484,7 +498,7 @@ document.addEventListener("DOMContentLoaded", function () {
     itemName.focus();
   }
 
-  function deleteItem(id) {
+  async function deleteItem(id) {
     const selectedItem = items.find((item) => item.id === id);
     if (!selectedItem) return;
 
@@ -492,21 +506,22 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!shouldDelete) return;
 
     items = items.filter((item) => item.id !== id);
-    saveItemsAndRender();
-    showToast("Item deleted successfully.");
+    if (await saveMenuAndRender()) showToast("Item deleted successfully.");
 
     if (itemId.value === id) itemDialog.close();
   }
 
-  function saveCategoriesAndRender() {
-    window.MenuStore.saveCategories(categories);
-    renderCategoryOptions();
-    renderCategories();
-  }
-
-  function saveItemsAndRender() {
-    window.MenuStore.saveItems(items);
-    renderCategories();
+  async function saveMenuAndRender() {
+    try {
+      await window.MenuStore.save(categories, items);
+      renderCategoryOptions();
+      renderCategories();
+      return true;
+    } catch (error) {
+      showToast("Save failed: " + error.message);
+      if (/authenticated/i.test(error.message)) setAuthView(false);
+      return false;
+    }
   }
 
   function updateItemPreview() {

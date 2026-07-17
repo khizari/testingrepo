@@ -1,8 +1,10 @@
 /**
  * Cart Page - Standalone cart page with full cart functionality
  */
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
   "use strict";
+
+  if (window.MenuStore?.ready) await window.MenuStore.ready;
 
   const CART_KEY = "fastFoodCart";
   const cartContainer = document.getElementById("cartItemsContainer");

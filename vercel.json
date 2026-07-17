@@ -1,0 +1,5 @@
+{
+  "functions": {
+    "api/menu.js": { "includeFiles": "data/**" }
+  }
+}
