@@ -647,7 +647,16 @@ document.addEventListener("DOMContentLoaded", function () {
     return escapeHtml(value).replace(/`/g, "&#096;");
   }
 
-  function compressImage(file, maxDimension, quality) {
+  // Menu/popular cards on the site are landscape (roughly 4:3–7:4). Photos
+  // admin uploads can be any shape (portrait phone photos, squares, etc.),
+  // and letting CSS `object-fit: cover` crop those live is what caused the
+  // "zoomed in / doesn't fit" look — cover crops to fill the box, so a tall
+  // photo in a wide box gets cropped down to a tiny sliver of its middle.
+  // Instead we center-crop to a fixed 4:3 landscape ratio right here, before
+  // resizing/compressing, so every uploaded photo is already framed the way
+  // the cards expect and object-fit only ever needs to do a gentle trim.
+  function compressImage(file, maxDimension, quality, targetAspectRatio) {
+    targetAspectRatio = targetAspectRatio || 4 / 3; // width / height
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onerror = () => reject(new Error("Could not read the file"));
@@ -655,21 +664,38 @@ document.addEventListener("DOMContentLoaded", function () {
         const image = new Image();
         image.onerror = () => reject(new Error("Could not read the image"));
         image.onload = () => {
-          let { width, height } = image;
-          if (width > maxDimension || height > maxDimension) {
-            if (width >= height) {
-              height = Math.round((height / width) * maxDimension);
-              width = maxDimension;
+          // 1. Center-crop the source to the target aspect ratio.
+          const sourceRatio = image.width / image.height;
+          let cropWidth = image.width;
+          let cropHeight = image.height;
+          if (sourceRatio > targetAspectRatio) {
+            // Source is wider than the target: trim the left/right edges.
+            cropWidth = Math.round(image.height * targetAspectRatio);
+          } else {
+            // Source is taller than the target: trim the top/bottom edges.
+            cropHeight = Math.round(image.width / targetAspectRatio);
+          }
+          const cropX = Math.round((image.width - cropWidth) / 2);
+          const cropY = Math.round((image.height - cropHeight) / 2);
+
+          // 2. Scale the cropped result down so its longer side is maxDimension.
+          let outWidth = cropWidth;
+          let outHeight = cropHeight;
+          if (outWidth > maxDimension || outHeight > maxDimension) {
+            if (outWidth >= outHeight) {
+              outHeight = Math.round((outHeight / outWidth) * maxDimension);
+              outWidth = maxDimension;
             } else {
-              width = Math.round((width / height) * maxDimension);
-              height = maxDimension;
+              outWidth = Math.round((outWidth / outHeight) * maxDimension);
+              outHeight = maxDimension;
             }
           }
+
           const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = outWidth;
+          canvas.height = outHeight;
           const ctx = canvas.getContext("2d");
-          ctx.drawImage(image, 0, 0, width, height);
+          ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, outWidth, outHeight);
           resolve(canvas.toDataURL("image/jpeg", quality));
         };
         image.src = reader.result;
