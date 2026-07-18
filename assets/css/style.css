@@ -670,12 +670,13 @@ nav ul li a.btn::after {
 .menu-item-img {
   height: 20rem;
   overflow: hidden;
+  background: var(--light);
 }
 
 .menu-item-img img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   transition: var(--transition);
 }
 
@@ -1379,12 +1380,13 @@ footer {
   position: relative;
   height: 220px;
   overflow: hidden;
+  background: var(--light);
 }
 
 .dish-image img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   transition: transform 0.5s ease;
 }
 
