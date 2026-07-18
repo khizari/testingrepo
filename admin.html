@@ -22,13 +22,13 @@
       <form id="loginForm" class="login-card">
         <span class="eyebrow">Admin Login</span>
         <h1 id="loginTitle">Menu Admin Panel</h1>
-        <p>Admin username aur password enter karein, phir admin panel open hoga.</p>
+        <p>Email aur password enter karein, phir admin panel open hoga.</p>
 
-        <label for="adminEmail">Admin Username</label>
+        <label for="adminEmail">Username</label>
         <input
           id="adminEmail"
           type="text"
-          placeholder="Admin username"
+          placeholder="Enter admin username"
           autocomplete="username"
           required
         />
@@ -38,7 +38,7 @@
           <input
             id="adminPassword"
             type="password"
-            placeholder="Admin password"
+            placeholder="Enter password"
             autocomplete="current-password"
             required
           />
@@ -62,6 +62,11 @@
         <h1>Menu Admin Panel</h1>
       </div>
       <div class="header-actions">
+        <span id="saveStatus" class="save-status" aria-live="polite"></span>
+        <button type="button" id="saveChangesButton" class="primary-btn compact-btn">
+          <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+          Save Changes
+        </button>
         <button type="button" id="logoutButton" class="logout-btn">
           <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
           Logout

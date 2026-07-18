@@ -1,5 +1,7 @@
 {
   "functions": {
-    "api/menu.js": { "includeFiles": "data/**" }
+    "api/menu.js": {
+      "includeFiles": "data/**"
+    }
   }
 }

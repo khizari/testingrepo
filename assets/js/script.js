@@ -3,10 +3,8 @@
  * JavaScript for interactivity and animations
  */
 
-document.addEventListener("DOMContentLoaded", async function () {
+document.addEventListener("DOMContentLoaded", function () {
   "use strict";
-
-  if (window.MenuStore?.ready) await window.MenuStore.ready;
 
   // DOM Elements
   const header = document.querySelector("header");
@@ -19,6 +17,15 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   renderMenuFromAdminData();
   renderPopularFromAdminData();
+
+  // MenuStore does an instant render with bundled defaults above, then
+  // fetches the live menu from the server. Re-render once that arrives
+  // (and again any time it changes) so the page reflects real admin edits.
+  window.addEventListener("menu:updated", function () {
+    renderMenuFromAdminData();
+    renderPopularFromAdminData();
+    highlightActiveSection();
+  });
 
   // Initialize active link as soon as the page is interactive.
   highlightActiveSection();

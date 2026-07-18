@@ -193,6 +193,21 @@ textarea {
   align-items: center;
 }
 
+.save-status {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #888;
+  white-space: nowrap;
+}
+
+.save-status.ok {
+  color: #1f9d55;
+}
+
+.save-status.err {
+  color: #e0433c;
+}
+
 .site-link,
 .logout-btn {
   display: inline-flex;

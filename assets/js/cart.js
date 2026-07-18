@@ -1,10 +1,8 @@
 /**
  * Cart Page - Standalone cart page with full cart functionality
  */
-document.addEventListener("DOMContentLoaded", async function () {
+document.addEventListener("DOMContentLoaded", function () {
   "use strict";
-
-  if (window.MenuStore?.ready) await window.MenuStore.ready;
 
   const CART_KEY = "fastFoodCart";
   const cartContainer = document.getElementById("cartItemsContainer");
@@ -203,4 +201,10 @@ document.addEventListener("DOMContentLoaded", async function () {
   setDeliveryDate();
   renderCart();
   renderPopular();
+
+  // Re-render popular items once the live server menu data arrives
+  // (MenuStore first paints with bundled defaults, then fetches /api/menu).
+  window.addEventListener("menu:updated", function () {
+    renderPopular();
+  });
 });

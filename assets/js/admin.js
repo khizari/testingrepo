@@ -1,7 +1,12 @@
-document.addEventListener("DOMContentLoaded", async function () {
+document.addEventListener("DOMContentLoaded", function () {
   "use strict";
 
   if (!window.MenuStore) return;
+
+  // Auth now lives on the server (api/login.js, api/session.js, api/logout.js)
+  // backed by the ADMIN_USERNAME / ADMIN_PASSWORD env vars + a signed,
+  // HttpOnly session cookie. There is no client-side credential check.
+  let isAuthed = false;
 
   const imageOptions = [
     "assets/images/burger.png",
@@ -27,6 +32,8 @@ document.addEventListener("DOMContentLoaded", async function () {
   const loginError = document.getElementById("loginError");
   const togglePassword = document.getElementById("togglePassword");
   const logoutButton = document.getElementById("logoutButton");
+  const saveChangesButton = document.getElementById("saveChangesButton");
+  const saveStatus = document.getElementById("saveStatus");
   const adminHeader = document.querySelector(".admin-header");
   const adminShell = document.querySelector(".admin-shell");
 
@@ -64,45 +71,141 @@ document.addEventListener("DOMContentLoaded", async function () {
   const closeItemDialog = document.getElementById("closeItemDialog");
   const cancelItem = document.getElementById("cancelItem");
 
-  await window.MenuStore.ready;
   let categories = window.MenuStore.readCategories();
   let currentVariants = [];
   let currentAddons = [];
   let items = window.MenuStore.readItems();
+  let isSaving = false;
+  let isDirty = false;
 
-  setupSelects();
-  renderCategories();
-  await syncAuthView();
+  init();
+
+  async function init() {
+    setupSelects();
+    renderCategories();
+
+    // /api/menu is public (GET), so the data is already loading in the
+    // background via MenuStore. Refresh the local copies once it's in.
+    window.MenuStore.ready.then(() => {
+      categories = window.MenuStore.readCategories();
+      items = window.MenuStore.readItems();
+      renderCategoryOptions();
+      renderCategories();
+    });
+
+    await checkSession();
+  }
+
+  async function checkSession() {
+    try {
+      const res = await fetch("/api/session");
+      const data = await res.json();
+      isAuthed = Boolean(data && data.authenticated);
+    } catch (err) {
+      isAuthed = false;
+    }
+    syncAuthView();
+  }
+
+  // Edits (add/edit/delete/reorder category or item) only change the
+  // in-memory copy and re-render instantly. Nothing reaches the server
+  // until the admin clicks "Save Changes" — same pattern as the reference
+  // admin panel this is based on.
+  function markDirty() {
+    isDirty = true;
+    if (saveChangesButton) saveChangesButton.disabled = false;
+    if (saveStatus) {
+      saveStatus.textContent = "Unsaved changes";
+      saveStatus.className = "save-status";
+    }
+  }
+
+  async function persistMenu() {
+    if (isSaving) return;
+    isSaving = true;
+    if (saveChangesButton) saveChangesButton.disabled = true;
+    if (saveStatus) {
+      saveStatus.textContent = "Saving…";
+      saveStatus.className = "save-status";
+    }
+
+    try {
+      await window.MenuStore.saveAll(categories, items);
+      isDirty = false;
+      if (saveStatus) {
+        saveStatus.textContent = "Saved ✓";
+        saveStatus.className = "save-status ok";
+      }
+      showToast("Changes saved successfully.");
+    } catch (err) {
+      if (saveChangesButton) saveChangesButton.disabled = false;
+      if (saveStatus) {
+        saveStatus.textContent = "Save failed";
+        saveStatus.className = "save-status err";
+      }
+      showToast("Save failed: " + err.message);
+    } finally {
+      isSaving = false;
+      window.setTimeout(() => {
+        if (saveStatus && !isDirty) saveStatus.textContent = "";
+      }, 4000);
+    }
+  }
+
+  if (saveChangesButton) {
+    saveChangesButton.disabled = true;
+    saveChangesButton.addEventListener("click", persistMenu);
+  }
+
+  window.addEventListener("beforeunload", function (event) {
+    if (!isDirty) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 
   loginForm.addEventListener("submit", async function (event) {
     event.preventDefault();
 
     const email = adminEmail.value.trim();
     const password = adminPassword.value;
-
-    try {
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: email, password }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Login failed");
-    } catch (error) {
-      loginError.textContent = "Email ya password ghalat hai.";
-      adminPassword.value = "";
-      adminPassword.focus();
-      return;
-    }
+    const submitButton = loginForm.querySelector('button[type="submit"]');
 
     loginError.textContent = "";
-    setAuthView(true);
-    showToast("Admin panel open ho gaya.");
+    if (submitButton) submitButton.disabled = true;
+
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: email, password: password }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        loginError.textContent = data.error || "Email ya password ghalat hai.";
+        adminPassword.value = "";
+        adminPassword.focus();
+        return;
+      }
+
+      isAuthed = true;
+      syncAuthView();
+      showToast("Admin panel open ho gaya.");
+    } catch (err) {
+      loginError.textContent = "Login failed. Please check your connection and try again.";
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
   });
 
   logoutButton.addEventListener("click", async function () {
-    await fetch("/api/logout", { method: "POST" }).catch(() => {});
-    setAuthView(false);
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } catch (err) {
+      // Ignore network errors on logout; we still clear the local view.
+    }
+    isAuthed = false;
+    syncAuthView();
     loginForm.reset();
     adminEmail.focus();
   });
@@ -119,7 +222,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   addCategoryButton.addEventListener("click", openAddCategoryDialog);
   searchInput.addEventListener("input", renderCategories);
 
-  categoryForm.addEventListener("submit", async function (event) {
+  categoryForm.addEventListener("submit", function (event) {
     event.preventDefault();
 
     const name = categoryName.value.trim();
@@ -139,17 +242,17 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     if (existingIndex >= 0) {
       categories[existingIndex] = { id: currentId, label: name };
+      showToast("Category updated successfully.");
     } else {
       categories.unshift({ id: currentId, label: name });
+      showToast("New category added successfully.");
     }
 
-    if (await saveMenuAndRender()) {
-      categoryDialog.close();
-      showToast(existingIndex >= 0 ? "Category updated successfully." : "New category added successfully.");
-    }
+    saveCategoriesAndRender();
+    categoryDialog.close();
   });
 
-  itemForm.addEventListener("submit", async function (event) {
+  itemForm.addEventListener("submit", function (event) {
     event.preventDefault();
 
     const currentId = itemId.value || window.MenuStore.createId(itemName.value);
@@ -169,14 +272,14 @@ document.addEventListener("DOMContentLoaded", async function () {
     const selectedIndex = items.findIndex((item) => item.id === currentId);
     if (selectedIndex >= 0) {
       items[selectedIndex] = nextItem;
+      showToast("Item updated successfully.");
     } else {
       items.push(nextItem);
+      showToast("New item added successfully.");
     }
 
-    if (await saveMenuAndRender()) {
-      itemDialog.close();
-      showToast(selectedIndex >= 0 ? "Item updated successfully." : "New item added successfully.");
-    }
+    saveItemsAndRender();
+    itemDialog.close();
   });
 
   updateItemPreview();
@@ -188,14 +291,8 @@ document.addEventListener("DOMContentLoaded", async function () {
       try {
         itemImagePreview.style.opacity = "0.5";
         const dataUrl = await compressImage(file, 1000, 0.82);
-        const response = await fetch("/api/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: file.name, dataUrl }),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || "Upload failed");
-        itemImage.value = data.url;
+        const url = await window.MenuStore.uploadImage(file.name, dataUrl);
+        itemImage.value = url;
         updateItemPreview();
       } catch (err) {
         showToast("Photo upload failed: " + err.message);
@@ -288,17 +385,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       .join("");
   }
 
-  async function syncAuthView() {
-    let isLoggedIn = false;
-    try {
-      const response = await fetch("/api/session", { cache: "no-store" });
-      const data = await response.json();
-      isLoggedIn = Boolean(data.authenticated);
-    } catch (_) {}
-    setAuthView(isLoggedIn);
-  }
+  function syncAuthView() {
+    const isLoggedIn = isAuthed;
 
-  function setAuthView(isLoggedIn) {
     document.body.classList.toggle("admin-locked", !isLoggedIn);
     loginScreen.hidden = isLoggedIn;
     adminHeader.hidden = !isLoggedIn;
@@ -424,7 +513,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   }
 
 
-  async function moveCategory(id, direction) {
+  function moveCategory(id, direction) {
     const currentIndex = categories.findIndex((category) => category.id === id);
     if (currentIndex < 0) return;
 
@@ -433,9 +522,10 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     const [category] = categories.splice(currentIndex, 1);
     categories.splice(nextIndex, 0, category);
-    if (await saveMenuAndRender()) showToast("Category order updated.");
+    saveCategoriesAndRender();
+    showToast("Category order updated.");
   }
-  async function deleteCategory(id) {
+  function deleteCategory(id) {
     const selectedCategory = categories.find((category) => category.id === id);
     if (!selectedCategory) return;
 
@@ -447,7 +537,10 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     categories = categories.filter((category) => category.id !== id);
     items = items.filter((item) => item.category !== id);
-    if (await saveMenuAndRender()) showToast("Category deleted successfully.");
+    renderCategoryOptions();
+    renderCategories();
+    markDirty();
+    showToast("Category deleted successfully.");
   }
 
   function openAddItemDialog(categoryId) {
@@ -498,7 +591,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     itemName.focus();
   }
 
-  async function deleteItem(id) {
+  function deleteItem(id) {
     const selectedItem = items.find((item) => item.id === id);
     if (!selectedItem) return;
 
@@ -506,22 +599,21 @@ document.addEventListener("DOMContentLoaded", async function () {
     if (!shouldDelete) return;
 
     items = items.filter((item) => item.id !== id);
-    if (await saveMenuAndRender()) showToast("Item deleted successfully.");
+    saveItemsAndRender();
+    showToast("Item deleted successfully.");
 
     if (itemId.value === id) itemDialog.close();
   }
 
-  async function saveMenuAndRender() {
-    try {
-      await window.MenuStore.save(categories, items);
-      renderCategoryOptions();
-      renderCategories();
-      return true;
-    } catch (error) {
-      showToast("Save failed: " + error.message);
-      if (/authenticated/i.test(error.message)) setAuthView(false);
-      return false;
-    }
+  function saveCategoriesAndRender() {
+    renderCategoryOptions();
+    renderCategories();
+    markDirty();
+  }
+
+  function saveItemsAndRender() {
+    renderCategories();
+    markDirty();
   }
 
   function updateItemPreview() {
